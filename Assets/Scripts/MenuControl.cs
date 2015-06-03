@@ -3,12 +3,14 @@ using System.Collections;
 
 public class MenuControl : MonoBehaviour
 {
+	public RectTransform menuContainer = null;
 	public UnityEngine.UI.InputField fieldName = null;
 	public UnityEngine.UI.InputField fieldAddress = null;
 	public UnityEngine.UI.Button findLanButton = null;
 	public UnityEngine.UI.Button directConnectButton = null;
 	public UnityEngine.UI.Text statusText = null;
-	public string SceneToLoad = "";
+	public string appid = "divine-and-conquer-prealpha";
+	public uint max_players = 4;
 
 	enum ConnectingState
 	{
@@ -25,12 +27,34 @@ public class MenuControl : MonoBehaviour
 	float c_timestamp;
 	string clientname;
 	string address;
-	const string appid = "divine-and-conquer";
 	bool connected = false;
+
+	string lastError = "";
+	float m_timeLeftError = 0.0f;
+
+	void SetLastError(string errorMsg)
+	{
+		lastError = errorMsg;
+		m_timeLeftError = 5;
+	}
 
 	void Start()
 	{
 
+	}
+
+	void FixedUpdate()
+	{
+		if (menuContainer != null)
+		{
+			Vector2 pivot = menuContainer.pivot;
+			if (connected)
+				pivot.y = Mathf.Lerp(pivot.y, 0.0f, 0.1f);
+			else
+				pivot.y = Mathf.Lerp(pivot.y, 1.0f, 0.1f);
+
+			menuContainer.pivot = pivot;
+		}
 	}
 
 	void Update()
@@ -50,34 +74,45 @@ public class MenuControl : MonoBehaviour
 		if (connected)
 		{
 			statusText.text = "Connected!";
-			if (!string.IsNullOrEmpty(SceneToLoad))
-				Application.LoadLevel(SceneToLoad);
 		}
 		else
 		{
-			switch (c_state)
+			if (c_state == ConnectingState.Nothing && !string.IsNullOrEmpty(lastError))
 			{
-				case ConnectingState.Nothing:
-					statusText.text = "";
-					break;
-				case ConnectingState.Start:
-					statusText.text = "Starting connection";
-					break;
-				case ConnectingState.FindingInLAN:
-					statusText.text = "Finding servers in LAN";
-					break;
-				case ConnectingState.Refreshing:
-					statusText.text = "Finding lowest ping server";
-					break;
-				case ConnectingState.Connecting:
-					statusText.text = "Connecting server";
-					break;
-				case ConnectingState.Disconnecting:
-					statusText.text = "Disconnecting";
-					break;
-				case ConnectingState.JoiningRoom:
-					statusText.text = "Joining random room";
-					break;
+				statusText.text = lastError;
+				m_timeLeftError -= Time.deltaTime;
+				if (m_timeLeftError < 0)
+				{
+					m_timeLeftError = 0;
+					lastError = "";
+				}
+			}
+			else
+			{
+				switch (c_state)
+				{
+					case ConnectingState.Nothing:
+						statusText.text = "";
+						break;
+					case ConnectingState.Start:
+						statusText.text = "Starting connection";
+						break;
+					case ConnectingState.FindingInLAN:
+						statusText.text = "Finding servers in LAN";
+						break;
+					case ConnectingState.Refreshing:
+						statusText.text = "Finding lowest ping server";
+						break;
+					case ConnectingState.Connecting:
+						statusText.text = "Connecting server";
+						break;
+					case ConnectingState.Disconnecting:
+						statusText.text = "Disconnecting";
+						break;
+					case ConnectingState.JoiningRoom:
+						statusText.text = "Joining random room";
+						break;
+				}
 			}
 		}
 		
@@ -93,7 +128,7 @@ public class MenuControl : MonoBehaviour
 				if (c_state == ConnectingState.Connecting)
 				{
 					client.SetLocalClientParameters(con[0].id, clientname, appid);
-					client.JoinRandomOrCreateRoom(con[0].id, 4);
+					client.JoinRandomOrCreateRoom(con[0].id, (uint) Mathf.Max(1, max_players));
 					c_state = ConnectingState.JoiningRoom;
 					c_timestamp = now;
 				}
@@ -107,6 +142,7 @@ public class MenuControl : MonoBehaviour
 					else if (joinedRoom != BiribitClient.UnassignedId)
 					{
 						c_state = ConnectingState.Nothing;
+						SetLastError("Couldn't join or create a room.");
 					}
 				}
 
@@ -120,7 +156,8 @@ public class MenuControl : MonoBehaviour
 				}
 			}
 			else
-			{ // not connected
+			{ 
+				// not connected
 				if (c_state == ConnectingState.Start)
 				{
 					if (string.IsNullOrEmpty(address))
@@ -153,6 +190,7 @@ public class MenuControl : MonoBehaviour
 						if (info.Length == 0)
 						{
 							c_state = ConnectingState.Nothing;
+							SetLastError("Not servers in LAN found.");
 						}
 						else
 						{
@@ -182,6 +220,7 @@ public class MenuControl : MonoBehaviour
 					if ((now - c_timestamp) > 3)
 					{
 						c_state = ConnectingState.Nothing;
+						SetLastError("Couldn't connect to server.");
 					}
 				}
 
