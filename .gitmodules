@@ -1,3 +1,6 @@
 [submodule "Assets/BiribitForUnity"]
 	path = Assets/BiribitForUnity
 	url = https://github.com/budsan/BiribitForUnity
+[submodule "Assets/SilverUI"]
+	path = Assets/SilverUI
+	url = https://github.com/budsan/SilverUI
