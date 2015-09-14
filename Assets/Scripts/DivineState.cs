@@ -201,6 +201,8 @@ namespace Divine
 		private List<int> m_randomValues = new List<int>();
 
 		private const int deckSize = 20;
+		public int DeckSize { get { return deckSize; } }
+
 		private Card[] m_deck = new Card[0];
 		private Player[] m_players = new Player[0];
 
