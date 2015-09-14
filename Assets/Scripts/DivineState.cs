@@ -3,61 +3,85 @@ using System.Collections.Generic;
 
 namespace Divine
 {
-	public class Card
+	public enum CardType
 	{
-		public enum Type
-		{
-			None,
-			FirstOration,
-			SecondOration,
-			ThirdOration,
-			Curse,
-			Radar,
-			AntiRadar,
-			Shuffle,
-			RevealCard,
-			Bounce
-		}
+		None,
+		FirstOration,
+		SecondOration,
+		ThirdOration,
+		Curse,
+		Radar,
+		AntiRadar,
+		Shuffle,
+		RevealCard,
+		Bounce
+	}
 
+	public interface CardView
+	{
+		CardType Type { get; }
+		int BelongsTo { get; }
+		int BounceTo { get; }
+	}
+
+	internal class Card : CardView
+	{
 		public const int NoCardIndex = -1;
 
-		public Type type;
-		public int belongsTo;
-		public int bounceIndex;
+		internal CardType type;
+		internal int belongsTo;
+		internal int bounceTo;
 
-		public Card(Type _type)
+		public CardType Type { get { return type; } }
+		public int BelongsTo { get { return belongsTo; } }
+		public int BounceTo { get { return bounceTo; } }
+
+		internal Card(CardType _type)
 		{
 			type = _type;
 			belongsTo = Player.NoPlayerIndex;
-			bounceIndex = NoCardIndex;
+			bounceTo = NoCardIndex;
 		}
 
-		public void SwapTypes(Card other)
+		internal void SwapTypes(Card other)
 		{
-			Type foo = other.type;
+			CardType foo = other.type;
 			other.type = type;
 			type = foo;
 		}
 
-		public int Bounce()
+		internal int Bounce()
 		{
-			int result = bounceIndex;
-			bounceIndex = NoCardIndex;
+			int result = bounceTo;
+			bounceTo = NoCardIndex;
 			return result;
 		}
 	}
 
-	public class Player
+	public interface PlayerView
+	{
+		int[] Hand { get; }
+		bool[] Orations { get; }
+		bool Winner { get; }
+		bool NeedToDraw { get; }
+	}
+
+	internal class Player : PlayerView
 	{
 		public const int NoPlayerIndex = -1;
 		public const int handSize = 3;
 
-		public int[] hand;
-		public bool[] orations;
-		public bool winner;
-		public bool needToDraw;
+		internal int[] hand;
+		internal bool[] orations;
+		internal bool winner;
+		internal bool needToDraw;
 
-		public Player()
+		public int[] Hand { get { return hand; } }
+		public bool[] Orations { get { return orations; } }
+		public bool Winner { get { return winner; } }
+		public bool NeedToDraw { get { return needToDraw; } }
+
+		internal Player()
 		{
 			hand = new int[handSize];
 			for (int i = 0; i < handSize; i++)
@@ -71,7 +95,7 @@ namespace Divine
 			needToDraw = true;
 		}
 
-		public void DrawCard(int playerIndex, int cardIndex, Card card)
+		internal void DrawCard(int playerIndex, int cardIndex, Card card)
 		{
 			if (card.belongsTo != NoPlayerIndex)
 				return;
@@ -93,7 +117,7 @@ namespace Divine
 				}
 		}
 
-		public void ThrowCard(int cardIndex, Card card)
+		internal void ThrowCard(int cardIndex, Card card)
 		{
 			for (int i = 0; i < handSize; i++)
 				if (hand[i] == cardIndex)
@@ -104,7 +128,7 @@ namespace Divine
 				}
 		}
 
-		public bool FirstOration()
+		internal bool FirstOration()
 		{
 			if (!orations[0])
 			{
@@ -115,7 +139,7 @@ namespace Divine
 			return false;
 		}
 
-		public bool SecondOration()
+		internal bool SecondOration()
 		{
 			if (orations[0] && !orations[1])
 			{
@@ -126,7 +150,7 @@ namespace Divine
 			return false;
 		}
 
-		public bool ThirdOration()
+		internal bool ThirdOration()
 		{
 			if (orations[0] && orations[1] && !orations[2])
 			{
@@ -138,34 +162,55 @@ namespace Divine
 			return false;
 		}
 
-		public Card.Type GetRadarCardType()
+		internal CardType GetRadarCardType()
 		{
 			if (!orations[0])
-				return Card.Type.FirstOration;
+				return CardType.FirstOration;
 			else if (orations[0] && !orations[1])
-				return Card.Type.SecondOration;
+				return CardType.SecondOration;
 			else if (orations[0] && orations[1] && !orations[2])
-				return Card.Type.ThirdOration;
+				return CardType.ThirdOration;
 			else
-				return Card.Type.None;
+				return CardType.None;
 		}
 	}
 
 	public class State
 	{
-		private Random m_random = null;
+		[Flags]
+		public enum EndOfRoundType
+		{
+			None = 0,
+			UsedFirstOration = 1 << 0,
+			UsedSecondOration = 1 << 1,
+			UsedThirdOration = 1 << 2
+		}
+
+		public interface Listener
+		{
+			void OnRadar(int playerIndex);
+			void OnRevealCard(int playerIndex, int cardIndex, CardType card);
+			void OnEndOfRound(EndOfRoundType type);
+		}
+
+		private HashSet<Listener> m_listeners = new HashSet<Listener>();
+		public void AddListener(Listener listener) { m_listeners.Add(listener); }
+		public void DelListener(Listener listener) { m_listeners.Remove(listener); }
+
+		private Random m_random = new Random();
 		private List<int> m_randomValues = new List<int>();
 
 		private const int deckSize = 20;
-		private Card[] m_deck;
-		private Player[] m_players;
-		public bool[] m_needToDraw;
+		private Card[] m_deck = new Card[0];
+		private Player[] m_players = new Player[0];
 
-		public delegate void RadarDelegate(int playerIndex);
-		public event RadarDelegate OnRadar;
+		private int[] m_playersTurn = new int[0];
+		private int m_playerTurnIndex = 0;
+		private bool[] m_needToDraw = new bool[0];
+		private EndOfRoundType m_endOfRoundType = EndOfRoundType.None;
 
-		public delegate void RevealCardDelegate(int playerIndex, int cardIndex, Card.Type card);
-		public event RevealCardDelegate OnRevealCard;
+		public CardView GetCard(int cardIndex) { return m_deck[cardIndex]; }
+		public PlayerView GetPlayer(int playerIndex) { return m_players[playerIndex]; }
 
 		public void StartGame(int seed, int playerCount = 4)
 		{
@@ -173,35 +218,42 @@ namespace Divine
 			m_randomValues.Clear();
 
 			m_deck = new Card[deckSize];
-			m_deck[0] = new Card(Card.Type.FirstOration);
-			m_deck[1] = new Card(Card.Type.SecondOration);
-			m_deck[2] = new Card(Card.Type.ThirdOration);
-			m_deck[3] = new Card(Card.Type.Curse);
-			m_deck[4] = new Card(Card.Type.Radar);
-			m_deck[5] = new Card(Card.Type.Radar);
-			m_deck[6] = new Card(Card.Type.Radar);
-			m_deck[7] = new Card(Card.Type.AntiRadar);
-			m_deck[8] = new Card(Card.Type.AntiRadar);
-			m_deck[9] = new Card(Card.Type.AntiRadar);
-			m_deck[10] = new Card(Card.Type.Shuffle);
-			m_deck[11] = new Card(Card.Type.Shuffle);
-			m_deck[12] = new Card(Card.Type.Shuffle);
-			m_deck[13] = new Card(Card.Type.RevealCard);
-			m_deck[14] = new Card(Card.Type.RevealCard);
-			m_deck[15] = new Card(Card.Type.RevealCard);
-			m_deck[16] = new Card(Card.Type.RevealCard);
-			m_deck[17] = new Card(Card.Type.RevealCard);
-			m_deck[18] = new Card(Card.Type.RevealCard);
-			m_deck[19] = new Card(Card.Type.RevealCard);
+			m_deck[0] = new Card(CardType.FirstOration);
+			m_deck[1] = new Card(CardType.SecondOration);
+			m_deck[2] = new Card(CardType.ThirdOration);
+			m_deck[3] = new Card(CardType.Curse);
+			m_deck[4] = new Card(CardType.Radar);
+			m_deck[5] = new Card(CardType.Radar);
+			m_deck[6] = new Card(CardType.Radar);
+			m_deck[7] = new Card(CardType.AntiRadar);
+			m_deck[8] = new Card(CardType.AntiRadar);
+			m_deck[9] = new Card(CardType.AntiRadar);
+			m_deck[10] = new Card(CardType.Shuffle);
+			m_deck[11] = new Card(CardType.Shuffle);
+			m_deck[12] = new Card(CardType.Shuffle);
+			m_deck[13] = new Card(CardType.RevealCard);
+			m_deck[14] = new Card(CardType.RevealCard);
+			m_deck[15] = new Card(CardType.RevealCard);
+			m_deck[16] = new Card(CardType.RevealCard);
+			m_deck[17] = new Card(CardType.RevealCard);
+			m_deck[18] = new Card(CardType.RevealCard);
+			m_deck[19] = new Card(CardType.RevealCard);
 
 			Shuffle(WholeDeck());
 
 			m_players = new Player[playerCount];
 			m_needToDraw = new bool[playerCount];
+			m_playersTurn = new int[playerCount];
 			for (int i = 0; i < m_players.Length; i++)
+			{
 				m_players[i] = new Player();
-		}
+				m_playersTurn[i] = i;
+			}
 
+			ShufflePlayers(m_playersTurn);
+			m_playerTurnIndex = 0;
+			m_endOfRoundType = EndOfRoundType.None;
+		}
 
 		public void DrawCard(int playerIndex, int cardIndex)
 		{
@@ -226,71 +278,101 @@ namespace Divine
 
 			switch (card.type)
 			{
-				case Card.Type.FirstOration:
+				case CardType.FirstOration:
 					if (player.FirstOration())
 					{
+						m_endOfRoundType |= EndOfRoundType.UsedFirstOration;
 						player.ThrowCard(cardIndex, card);
 						NextTurn();
 					}
 					break;
-				case Card.Type.SecondOration:
+				case CardType.SecondOration:
 					if (player.SecondOration())
 					{
+						m_endOfRoundType |= EndOfRoundType.UsedSecondOration;
 						player.ThrowCard(cardIndex, card);
 						NextTurn();
 					}
 					break;
-				case Card.Type.ThirdOration:
+				case CardType.ThirdOration:
 					if (player.ThirdOration())
 					{
+						m_endOfRoundType |= EndOfRoundType.UsedThirdOration;
 						player.ThrowCard(cardIndex, card);
 						NextTurn();
 					}
 					break;
-				case Card.Type.Curse:
+				case CardType.Curse:
 					//Do nothing, you cannot use Curse.
 					break;
-				case Card.Type.Radar:
+				case CardType.Radar:
 					Radar(player);
 					player.ThrowCard(cardIndex, card);
 					NextTurn();
 					break;
-				case Card.Type.AntiRadar:
+				case CardType.AntiRadar:
 					AntiRadar(playerIndex, player);
 					player.ThrowCard(cardIndex, card);
 					NextTurn();
 					break;
-				case Card.Type.Shuffle:
-					if (extra == null || extra.Length != 2)
-						return;
+				case CardType.Shuffle:
+					{
+						if (extra == null || extra.Length != 2)
+							return;
 
-					int cardTargetIndex1 = extra[0];
-					int cardTargetIndex2 = extra[1];
-					if (!ValidCardIndex(cardTargetIndex1) ||
-						!ValidCardIndex(cardTargetIndex2) ||
-						m_deck[cardTargetIndex1].belongsTo == Player.NoPlayerIndex ||
-						m_deck[cardTargetIndex2].belongsTo == Player.NoPlayerIndex)
-						return;
+						int cardTargetIndex1 = extra[0];
+						int cardTargetIndex2 = extra[1];
+						if (!ValidCardIndex(cardTargetIndex1) ||
+							!ValidCardIndex(cardTargetIndex2) ||
+							m_deck[cardTargetIndex1].belongsTo == Player.NoPlayerIndex ||
+							m_deck[cardTargetIndex2].belongsTo == Player.NoPlayerIndex)
+							return;
 
-					m_deck[cardTargetIndex1].SwapTypes(m_deck[cardTargetIndex2]);
-					player.ThrowCard(cardIndex, card);
-					NextTurn();
+						cardTargetIndex1 = GetCardWithBounce(cardTargetIndex1);
+						cardTargetIndex2 = GetCardWithBounce(cardTargetIndex2);
+
+						m_deck[cardTargetIndex1].SwapTypes(m_deck[cardTargetIndex2]);
+						player.ThrowCard(cardIndex, card);
+						NextTurn();
+					}
 					break;
-				case Card.Type.RevealCard:
-					if (extra == null || extra.Length != 1)
-						return;
+				case CardType.RevealCard:
+					{
+						if (extra == null || extra.Length != 1)
+							return;
 
-					int cardTargetIndex = extra[0];
-					if (!ValidCardIndex(cardTargetIndex) ||
-						m_deck[cardTargetIndex].belongsTo == Player.NoPlayerIndex)
-						return;
+						int cardTargetIndex = extra[0];
+						if (!ValidCardIndex(cardTargetIndex) ||
+							m_deck[cardTargetIndex].belongsTo == Player.NoPlayerIndex)
+							return;
 
-					EmitRevealCard(playerIndex, cardTargetIndex, m_deck[cardTargetIndex].type);
-					player.ThrowCard(cardIndex, card);
-					NextTurn();
+						cardTargetIndex = GetCardWithBounce(cardTargetIndex);
+
+						EmitRevealCard(playerIndex, cardTargetIndex, m_deck[cardTargetIndex].type);
+						player.ThrowCard(cardIndex, card);
+						NextTurn();
+					}
 					break;
-				case Card.Type.Bounce:
-					//TODO(Bud): Bounce
+				case CardType.Bounce:
+					{
+						if (extra == null || extra.Length != 2)
+							return;
+
+						int cardTargetIndex1 = extra[0];
+						int cardTargetIndex2 = extra[1];
+						if (!ValidCardIndex(cardTargetIndex1) ||
+							!ValidCardIndex(cardTargetIndex2) ||
+							m_deck[cardTargetIndex1].belongsTo == Player.NoPlayerIndex ||
+							m_deck[cardTargetIndex2].belongsTo == Player.NoPlayerIndex)
+							return;
+
+						cardTargetIndex1 = GetCardWithBounce(cardTargetIndex1);
+						cardTargetIndex2 = GetCardWithBounce(cardTargetIndex2);
+
+						m_deck[cardTargetIndex1].bounceTo = cardTargetIndex2;
+						player.ThrowCard(cardIndex, card);
+						NextTurn();
+					}
 					break;
 			}
 		}
@@ -337,6 +419,11 @@ namespace Divine
 			return Player.NoPlayerIndex;
 		}
 
+		public int GetWhoseTurnIsIt()
+		{
+			return m_playersTurn[m_playerTurnIndex];
+		}
+
 		//-UTILITY---------------------------------------------------------------//
 
 		private bool ValidPlayerIndex(int playerIndex)
@@ -349,9 +436,38 @@ namespace Divine
 			return cardIndex >= 0 || cardIndex < m_deck.Length;
 		}
 
+		private int GetCardWithBounce(int cardIndex)
+		{
+			if (!ValidCardIndex(cardIndex))
+				return Card.NoCardIndex;
+
+			int currentCardIndex = cardIndex;
+			while (true)
+			{
+				int next = m_deck[currentCardIndex].Bounce();
+				if (next == Card.NoCardIndex || m_deck[next].belongsTo == Player.NoPlayerIndex)
+					break;
+				else
+					currentCardIndex = next;
+			}
+
+			return currentCardIndex;
+		}
+
 		private void NextTurn()
 		{
-			// TODO(Bud): This function
+			m_playerTurnIndex++;
+
+			if (m_playerTurnIndex >= m_playersTurn.Length)
+			{
+				var endOfTurnType = m_endOfRoundType;
+
+				ShufflePlayers(m_playersTurn);
+				m_playerTurnIndex = 0;
+				m_endOfRoundType = EndOfRoundType.None;
+
+				EmitEndOfTurn(endOfTurnType);
+			}
 		}
 
 		private int NextRandom()
@@ -379,9 +495,20 @@ namespace Divine
 			}
 		}
 
+		private void ShufflePlayers(int[] playerTurns)
+		{
+			for (int i = 0; i < (playerTurns.Length - 1); i++)
+			{
+				int swapWith = i + (NextRandom() % (playerTurns.Length - i));
+				int foo = playerTurns[i];
+				playerTurns[i] = playerTurns[swapWith];
+				playerTurns[swapWith] = foo;
+			}
+		}
+
 		private void Radar(Player player)
 		{
-			Card.Type type = player.GetRadarCardType();
+			CardType type = player.GetRadarCardType();
 			for (int i = 0; i < deckSize; i++)
 			{
 				Card look = m_deck[i];
@@ -392,7 +519,7 @@ namespace Divine
 
 		private void AntiRadar(int playerIndex, Player player)
 		{
-			Card.Type type = player.GetRadarCardType();
+			CardType type = player.GetRadarCardType();
 			HashSet<int> targets = new HashSet<int>();
 			for (int i = 0; i < m_players.Length; i++)
 				targets.Add(i);
@@ -413,14 +540,20 @@ namespace Divine
 
 		private void EmitRadarBeep(int playerIndex)
 		{
-			if (OnRadar != null)
-				OnRadar(playerIndex);
+			foreach (Listener listener in m_listeners)
+				listener.OnRadar(playerIndex);
 		}
 
-		private void EmitRevealCard(int playerIndex, int cardIndex, Card.Type type)
+		private void EmitRevealCard(int playerIndex, int cardIndex, CardType type)
 		{
-			if (OnRevealCard != null)
-				OnRevealCard(playerIndex, cardIndex, type);
+			foreach (Listener listener in m_listeners)
+				listener.OnRevealCard(playerIndex, cardIndex, type);
+		}
+
+		private void EmitEndOfTurn(EndOfRoundType endOfRoundType)
+		{
+			foreach (Listener listener in m_listeners)
+				listener.OnEndOfRound(endOfRoundType);
 		}
 	}
 }

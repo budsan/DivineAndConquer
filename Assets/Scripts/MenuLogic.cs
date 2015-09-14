@@ -20,6 +20,8 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 	private int joinedRoomIndex = 0;
 	private uint joinedRoomSlot = Biribit.Client.UnassignedId;
 
+	private Divine.State m_game = new Divine.State();
+
 	private enum GameState
 	{
 		WaitingPlayers,
