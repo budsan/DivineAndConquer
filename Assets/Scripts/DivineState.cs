@@ -269,7 +269,8 @@ namespace Divine
 		public void UseCard(int playerIndex, int cardIndex, params int[] extra)
 		{
 			if (!ValidPlayerIndex(playerIndex) ||
-				!ValidCardIndex(cardIndex))
+				!ValidCardIndex(cardIndex) ||
+				playerIndex != m_playersTurn[m_playerTurnIndex])
 				return;
 
 			Card card = m_deck[cardIndex];

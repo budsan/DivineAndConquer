@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
+public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.Listener {
 
 	[SerializeField] private string address = "thatguystudio.com";
 	[SerializeField] private string clientName = "David";
@@ -19,6 +19,41 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 	private uint joinedRoomId = Biribit.Client.UnassignedId;
 	private int joinedRoomIndex = 0;
 	private uint joinedRoomSlot = Biribit.Client.UnassignedId;
+
+	private int m_turnAction = -1;
+	private List<int> m_turnExtraParams = new List<int>();
+
+	private class Announcement
+	{
+		public string message;
+		public float timeLeft;
+
+		public Announcement(string _message, float _timeLeft)
+		{
+			message = _message;
+			timeLeft = _timeLeft;
+		}
+	}
+
+	private const string NoAnnouncement = "No announcement";
+	private List<Announcement> m_announcement = new List<Announcement>();
+	private void AddAnnouncement(string _message, float _timeLeft = 20.0f)
+	{
+		m_announcement.Add(new Announcement(_message, _timeLeft));
+	}
+
+	private void UpdateAnnouncement(float deltaTime)
+	{
+		for (int i = 0; i < m_announcement.Count;)
+		{
+			Announcement ann = m_announcement[i];
+			ann.timeLeft -= deltaTime;
+			if (ann.timeLeft <= 0.0f)
+				m_announcement.RemoveAt(i);
+			else
+				i++;
+		}
+	}
 
 	private Divine.State m_game = null;
 	private int[] m_playerSet = new int[0];
@@ -42,8 +77,7 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 		GameRunning
 	}
 
-	private GameState gamestate = GameState.WaitingPlayers;
-	private int entries_read = 1;
+	private int entries_read = 0;
 
 	private List<string> serverInfoStrings = new List<string>();
 	private int serverInfoSelected = 0;
@@ -64,6 +98,8 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 		"Maria"
 	};
 
+	Silver.UI.Immediate.LayoutElementDescription buttonLayout = new Silver.UI.Immediate.LayoutElementDescription();
+
 	override public void Start()
 	{
 		base.Start();
@@ -77,6 +113,9 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 			System.Random ran = new System.Random();
 			clientName = randomNames[ran.Next() % randomNames.Length];
 		}
+
+		buttonLayout.flexibleWidth = 1;
+		buttonLayout.minHeight = 40;
 	}
 
 	override public void DrawUI()
@@ -265,10 +304,12 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 
 				manager.SendEntry(connectionId, 
 					DivineSerializator.Start(
-						(int)(new DateTime().Ticks & 0xFFFFFFFF),
+						(int)(DateTime.Now.Ticks & 0xFFFFFFFF),
 						playerSet.ToArray()
 					)
 				);
+
+				m_turnAction = -1;
 			}
 		}
 		else
@@ -282,6 +323,7 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 		int player = FindPlayerIndex((byte)manager.JoinedRoomSlot(connectionId));
 		if (player != Divine.Player.NoPlayerIndex)
 		{
+			DrawAnnouncement();
 			DrawPlayer(player);
 
 			bool[] draw = m_game.GetPlayersNeedToDraw();
@@ -335,7 +377,7 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 					}
 					else
 					{
-						DrawTurn();
+						DrawTurn(joinedRoom, player);
 					}
 				}
 			}
@@ -344,6 +386,18 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 		{
 			ui.LabelField("Wait players to finish...");
 		}
+	}
+
+	public void DrawAnnouncement()
+	{
+		ui.Separator(1);
+		ui.LabelField("Announcement", 14);
+		ui.LineSeparator();
+
+		foreach(Announcement ann in m_announcement)
+			ui.LabelField(ann.message, 12);
+
+		UpdateAnnouncement(Time.deltaTime);
 	}
 
 	public void DrawPlayer(int playerIndex)
@@ -377,19 +431,228 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 		});
 	}
 
-	public void DrawTurn()
+	public void DrawTurn(Biribit.Room joinedRoom, int playerIndex)
 	{
+		Divine.PlayerView player = m_game.GetPlayer(playerIndex);
+		ui.BeginHorizontalLayout();
 
+		Silver.UI.Immediate.FlagMask mask;
+		for (int i = 0; i < player.Hand.Length; i++)
+		{
+			if (i == 2)
+			{
+				ui.EndHorizontalLayout();
+				ui.BeginHorizontalLayout();
+			}
+
+			Divine.CardView card = m_game.GetCard(player.Hand[i]);
+			string buttonName = Enum.GetName(typeof(Divine.CardType), card.Type) +
+			" (" + (player.Hand[i] + 1).ToString() + ")";
+
+			mask = Silver.UI.Immediate.FlagMask.None;
+			if (m_turnAction == i || card.Type == Divine.CardType.Curse)
+				mask |= Silver.UI.Immediate.FlagMask.NoInteractable;
+
+			ui.NextLayoutElement = buttonLayout;
+			if (ui.Button(buttonName, mask))
+			{
+				m_turnAction = i;
+				m_turnExtraParams.Clear();
+			}
+		}
+
+		mask = Silver.UI.Immediate.FlagMask.None;
+		if (m_turnAction == 3)
+			mask |= Silver.UI.Immediate.FlagMask.NoInteractable;
+
+		ui.NextLayoutElement = buttonLayout;
+		if (ui.Button("Exchange", mask))
+		{
+			m_turnAction = 3;
+			m_turnExtraParams.Clear();
+		}
+
+		ui.EndHorizontalLayout();
+
+		if (m_turnAction >= 0 && m_turnAction < 3)
+		{
+			Divine.CardView card = m_game.GetCard(player.Hand[m_turnAction]);
+			switch(card.Type)
+			{
+				case Divine.CardType.FirstOration:
+					goto case Divine.CardType.AntiRadar;
+				case Divine.CardType.SecondOration:
+					goto case Divine.CardType.AntiRadar;
+				case Divine.CardType.ThirdOration:
+					goto case Divine.CardType.AntiRadar;
+				case Divine.CardType.Curse:
+					break;
+				case Divine.CardType.Radar:
+					goto case Divine.CardType.AntiRadar;
+				case Divine.CardType.AntiRadar:
+					manager.SendEntry(connectionId, 
+						DivineSerializator.UseCard(player.Hand[m_turnAction]));
+					m_turnAction = -1;
+					m_turnExtraParams.Clear();
+					break;
+				case Divine.CardType.Shuffle:
+					goto case Divine.CardType.Bounce;
+				case Divine.CardType.RevealCard:
+				{
+					ui.Separator(1);
+					ui.LabelField("Choose card to reveal");
+					ui.LineSeparator();
+
+					int choosenCardIndex = 0;
+					if (DrawChooseFromAnyPlayer(joinedRoom, ref choosenCardIndex, (int currentPlayer, out bool showTypes) =>
+					{
+						showTypes = (currentPlayer == playerIndex);
+						return showTypes;
+					}))
+					{
+						m_turnExtraParams.Add(choosenCardIndex);
+					}
+
+					if (m_turnExtraParams.Count >= 1)
+					{
+						ui.Separator(1);
+						manager.SendEntry(connectionId,
+							DivineSerializator.UseCard(player.Hand[m_turnAction], m_turnExtraParams.ToArray()));
+						m_turnAction = -1;
+						m_turnExtraParams.Clear();
+					}
+				}
+				break;
+				case Divine.CardType.Bounce:
+				{
+					ui.Separator(1);
+					if (m_turnExtraParams.Count < 1)
+						ui.LabelField("Choose first card");
+					else if (m_turnExtraParams.Count < 2)
+						ui.LabelField("Choose second card");
+					else
+					{
+						ui.Separator(1);
+						manager.SendEntry(connectionId,
+							DivineSerializator.UseCard(player.Hand[m_turnAction], m_turnExtraParams.ToArray()));
+						m_turnAction = -1;
+						m_turnExtraParams.Clear();
+					}
+
+					ui.LineSeparator();
+
+					int choosenCardIndex = 0;
+					if (DrawChooseFromAnyPlayer(joinedRoom, ref choosenCardIndex,
+						(int currentPlayer, out bool showTypes) =>
+						{
+							showTypes = (currentPlayer == playerIndex);
+							return false;
+						}))
+					{
+						m_turnExtraParams.Add(choosenCardIndex);
+					}
+				}
+				break;
+			}
+		}
+		else if (m_turnAction == 3)
+		{
+			//Exchange
+			if (m_turnExtraParams.Count < 1)
+			{
+				ui.Separator(1);
+				ui.LabelField("Choose one card of yours");
+				ui.LineSeparator();
+
+				int choosenCardIndex = 0;
+				if (DrawChooseCardFromPlayer(player, true, ref choosenCardIndex))
+					m_turnExtraParams.Add(choosenCardIndex);
+			}
+			else if (m_turnExtraParams.Count < 2)
+			{
+				ui.Separator(1);
+				ui.LabelField("Choose one card of your opponents");
+				ui.LineSeparator();
+
+				int choosenCardIndex = 0;
+				if (DrawChooseFromAnyPlayer(joinedRoom, ref choosenCardIndex,
+					(int index, out bool showTypes) => {
+						return (showTypes = (index == playerIndex));
+					}))
+				{
+					m_turnExtraParams.Add(choosenCardIndex);
+				}
+			}
+			else
+			{
+				manager.SendEntry(connectionId, DivineSerializator.ExchangeCard(m_turnExtraParams[0], m_turnExtraParams[1]));
+				m_turnAction = -1;
+				m_turnExtraParams.Clear();
+			}
+		}
+	}
+
+	public delegate bool DrawChooseFromAnyPlayerDelegate(int playerIndex, out bool showTypes);
+	public bool DrawChooseFromAnyPlayer(Biribit.Room joinedRoom, ref int cardIndex, DrawChooseFromAnyPlayerDelegate call)
+	{
+		bool clicked = false;
+		for (int i = 0; i < m_playerSet.Length; i++)
+		{
+			bool showTypes = false;
+			if (call != null)
+				if (call(i, out showTypes))
+					continue;
+
+			int opponentSlot = m_playerSet[i];
+			int opponentClientIndex = manager.RemoteClients(connectionId, joinedRoom.slots[opponentSlot]);
+			string drawName = (opponentClientIndex < 0) ?
+				joinedRoom.slots[opponentSlot].ToString() :
+				manager.RemoteClients(connectionId)[opponentClientIndex].name;
+
+			ui.Separator(1);
+			ui.LabelField("Player " + (i + 1).ToString() + "(" + drawName + ") card:", 14);
+			ui.LineSeparator();
+
+			Divine.PlayerView opponent = m_game.GetPlayer(i);
+
+			int choosenCardIndex = 0;
+			if (DrawChooseCardFromPlayer(opponent, showTypes, ref choosenCardIndex))
+			{
+				clicked = true;
+				cardIndex = choosenCardIndex;
+			}
+		}
+
+		return clicked;
+	}
+
+	public bool DrawChooseCardFromPlayer(Divine.PlayerView player, bool showTypes, ref int cardIndex)
+	{
+		bool clicked = false;
+		ui.BeginHorizontalLayout();
+		for (int i = 0; i < player.Hand.Length; i++)
+		{
+			Divine.CardView card = m_game.GetCard(player.Hand[i]);
+			string buttonName = (player.Hand[i] + 1).ToString();
+			if (showTypes)
+				buttonName = Enum.GetName(typeof(Divine.CardType), card.Type) + " (" + buttonName + ")";
+
+			ui.NextLayoutElement = buttonLayout;
+			if (ui.Button(buttonName))
+			{
+				clicked = true;
+				cardIndex = player.Hand[i];
+			}
+				
+		}
+		ui.EndHorizontalLayout();
+
+		return clicked;
 	}
 
 	public delegate bool DrawNumericEnableDelegate(int value);
-
 	public bool DrawNumeric(int rangeBegin, int rangeEnd, ref int result, DrawNumericEnableDelegate check = null)
 	{
-		Silver.UI.Immediate.LayoutElementDescription layout = new Silver.UI.Immediate.LayoutElementDescription();
-		layout.flexibleWidth = 1;
-		layout.minHeight = 40;
-
 		bool clicked = false;
 		for(int i = 0; i <= (rangeEnd - rangeBegin); i++)
 		{
@@ -404,7 +667,7 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 			if (check != null)
 				mask = check(i + rangeBegin) ? mask : mask | Silver.UI.Immediate.FlagMask.NoInteractable;
 
-			ui.NextLayoutElement = layout;
+			ui.NextLayoutElement = buttonLayout;
 			if (ui.Button((i + rangeBegin).ToString(), mask))
 			{
 				result = i + rangeBegin;
@@ -416,12 +679,50 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 		return clicked;
 	}
 
+	public void OnRadar(int playerIndex)
+	{
+		Biribit.Room joinedRoom = manager.Rooms(connectionId)[joinedRoomIndex];
+
+		int playerSlot = m_playerSet[playerIndex];
+		int clientIndex = manager.RemoteClients(connectionId, joinedRoom.slots[playerSlot]);
+		string drawName = (clientIndex < 0) ?
+			joinedRoom.slots[playerSlot].ToString() :
+			manager.RemoteClients(connectionId)[clientIndex].name;
+
+		AddAnnouncement("Player " + drawName + " emitted radar sound");
+	}
+
+	public void OnRevealCard(int playerIndex, int cardIndex, Divine.CardType card)
+	{
+		int player = FindPlayerIndex((byte)manager.JoinedRoomSlot(connectionId));
+		if (player == playerIndex)
+		{
+			AddAnnouncement("The card " + (cardIndex + 1).ToString() +
+				" is " + Enum.GetName(typeof(Divine.CardType), card));
+		}
+	}
+
+	public void OnEndOfRound(Divine.State.EndOfRoundType type)
+	{
+		AddAnnouncement("End of this round.");
+
+		if ((type & Divine.State.EndOfRoundType.UsedFirstOration) != 0)
+			AddAnnouncement("First part of the oration sounds.");
+
+		if ((type & Divine.State.EndOfRoundType.UsedSecondOration) != 0)
+			AddAnnouncement("Second part of the oration sounds.");
+
+		if ((type & Divine.State.EndOfRoundType.UsedThirdOration) != 0)
+			AddAnnouncement("Third part of the oration sounds.");
+	}
+
 	public void NewIncomingEntry(Biribit.Entry entry)
 	{
 		DivineSerializator.Deserialize(entry.data,
 			(int seed, int[] playerSet) => //OnStart
 			{
 				m_game = new Divine.State();
+				m_game.AddListener(this);
 				m_game.StartGame(seed, playerSet.Length);
 				m_playerSet = playerSet;
 			},
@@ -477,7 +778,7 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener {
 			joinedRoomId = roomId;
 			joinedRoomIndex = manager.Rooms(connectionId, joinedRoomId);
 			joinedRoomSlot = slotId;
-			entries_read = 1;
+			entries_read = 0;
 
 			ReadForEntries();
 		}
