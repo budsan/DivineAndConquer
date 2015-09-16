@@ -15,7 +15,7 @@ public class DivineSerializator
 	}
 
 	public delegate void StartDelegate(int seed, int[] playerSet);
-    public delegate void UseCardDelegate(int cardIndex, int[] extraParms);
+	public delegate void UseCardDelegate(int cardIndex, int[] extraParms);
 	public delegate void DrawCardDelegate(int cardIndex);
 	public delegate void ExchangeCardDelegate(int cardIndex1, int cardIndex2);
 

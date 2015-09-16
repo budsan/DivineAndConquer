@@ -62,6 +62,7 @@ namespace Divine
 	{
 		int[] Hand { get; }
 		bool[] Orations { get; }
+		int LastCardThrown { get; }
 		bool Winner { get; }
 		bool NeedToDraw { get; }
 	}
@@ -73,11 +74,13 @@ namespace Divine
 
 		internal int[] hand;
 		internal bool[] orations;
+		internal int lastCardThrown;
 		internal bool winner;
 		internal bool needToDraw;
 
 		public int[] Hand { get { return hand; } }
 		public bool[] Orations { get { return orations; } }
+		public int LastCardThrown { get { return lastCardThrown; } }
 		public bool Winner { get { return winner; } }
 		public bool NeedToDraw { get { return needToDraw; } }
 
@@ -93,12 +96,12 @@ namespace Divine
 
 			winner = false;
 			needToDraw = true;
+			lastCardThrown = Card.NoCardIndex;
 		}
 
 		internal void DrawCard(int playerIndex, int cardIndex, Card card)
 		{
-			if (card.belongsTo != NoPlayerIndex)
-				return;
+			AssertCardBelongsToPlayer(card, NoPlayerIndex);
 
 			for (int i = 0; i < handSize; i++)
 				if (hand[i] == Card.NoCardIndex)
@@ -124,8 +127,16 @@ namespace Divine
 				{
 					hand[i] = Card.NoCardIndex;
 					card.belongsTo = NoPlayerIndex;
+					card.bounceTo = Card.NoCardIndex;
+					lastCardThrown = cardIndex;
 					needToDraw = true;
 				}
+		}
+
+		private void AssertCardBelongsToPlayer(Card card, int playerIndex)
+		{
+			if (card.belongsTo != playerIndex)
+				throw new Exception("Card doesn't belong to player(" + playerIndex + ")");
 		}
 
 		internal bool FirstOration()
@@ -208,6 +219,9 @@ namespace Divine
 
 		private int[] m_playersTurn = new int[0];
 		private int m_playerTurnIndex = 0;
+		private int m_roundNumber = 0;
+		public int RoundNumber { get { return m_roundNumber; } }
+
 		private bool[] m_needToDraw = new bool[0];
 		private EndOfRoundType m_endOfRoundType = EndOfRoundType.None;
 
@@ -237,9 +251,9 @@ namespace Divine
 			m_deck[14] = new Card(CardType.RevealCard);
 			m_deck[15] = new Card(CardType.RevealCard);
 			m_deck[16] = new Card(CardType.RevealCard);
-			m_deck[17] = new Card(CardType.RevealCard);
-			m_deck[18] = new Card(CardType.RevealCard);
-			m_deck[19] = new Card(CardType.RevealCard);
+			m_deck[17] = new Card(CardType.Bounce);
+			m_deck[18] = new Card(CardType.Bounce);
+			m_deck[19] = new Card(CardType.Bounce);
 
 			Shuffle(WholeDeck());
 
@@ -255,30 +269,30 @@ namespace Divine
 			ShufflePlayers(m_playersTurn);
 			m_playerTurnIndex = 0;
 			m_endOfRoundType = EndOfRoundType.None;
+			m_roundNumber = 0;
 		}
 
 		public void DrawCard(int playerIndex, int cardIndex)
 		{
-			if (!ValidPlayerIndex(playerIndex) ||
-				!ValidCardIndex(cardIndex))
-				return;
+			AssertValidPlayerIndex(playerIndex);
+			AssertValidCardIndex(cardIndex);
 
-			m_players[playerIndex].DrawCard(playerIndex, cardIndex, m_deck[cardIndex]);
+			Player player = m_players[playerIndex];
+			if (player.lastCardThrown != cardIndex)
+				player.DrawCard(playerIndex, cardIndex, m_deck[cardIndex]);
 		}
 
 		public void UseCard(int playerIndex, int cardIndex, params int[] extra)
 		{
-			if (!ValidPlayerIndex(playerIndex) ||
-				!ValidCardIndex(cardIndex) ||
-				playerIndex != m_playersTurn[m_playerTurnIndex])
-				return;
+			AssertValidPlayerIndex(playerIndex);
+			AssertValidCardIndex(cardIndex);
+			AssertPlayerTurnUnequal(playerIndex);
 
 			Card card = m_deck[cardIndex];
 			Player player = m_players[playerIndex];
 
-			if (card.belongsTo != playerIndex)
-				return;
-
+			AssertCardBelongsToPlayer(cardIndex, playerIndex);
+			
 			switch (card.type)
 			{
 				case CardType.FirstOration:
@@ -320,16 +334,15 @@ namespace Divine
 					break;
 				case CardType.Shuffle:
 					{
-						if (extra == null || extra.Length != 2)
-							return;
+						AssertExtraParamsDontMatch(extra, 2);
 
 						int cardTargetIndex1 = extra[0];
 						int cardTargetIndex2 = extra[1];
-						if (!ValidCardIndex(cardTargetIndex1) ||
-							!ValidCardIndex(cardTargetIndex2) ||
-							m_deck[cardTargetIndex1].belongsTo == Player.NoPlayerIndex ||
-							m_deck[cardTargetIndex2].belongsTo == Player.NoPlayerIndex)
-							return;
+
+						AssertValidCardIndex(cardTargetIndex1);
+						AssertValidCardIndex(cardTargetIndex2);
+						AssertCardDoesntBelongToPlayer(cardTargetIndex1, Player.NoPlayerIndex);
+						AssertCardDoesntBelongToPlayer(cardTargetIndex2, Player.NoPlayerIndex);
 
 						cardTargetIndex1 = GetCardWithBounce(cardTargetIndex1);
 						cardTargetIndex2 = GetCardWithBounce(cardTargetIndex2);
@@ -341,13 +354,11 @@ namespace Divine
 					break;
 				case CardType.RevealCard:
 					{
-						if (extra == null || extra.Length != 1)
-							return;
+						AssertExtraParamsDontMatch(extra, 1);
 
 						int cardTargetIndex = extra[0];
-						if (!ValidCardIndex(cardTargetIndex) ||
-							m_deck[cardTargetIndex].belongsTo == Player.NoPlayerIndex)
-							return;
+						AssertValidCardIndex(cardTargetIndex);
+						AssertCardDoesntBelongToPlayer(cardTargetIndex, Player.NoPlayerIndex);
 
 						cardTargetIndex = GetCardWithBounce(cardTargetIndex);
 
@@ -358,16 +369,15 @@ namespace Divine
 					break;
 				case CardType.Bounce:
 					{
-						if (extra == null || extra.Length != 2)
-							return;
+						AssertExtraParamsDontMatch(extra, 2);
 
 						int cardTargetIndex1 = extra[0];
 						int cardTargetIndex2 = extra[1];
-						if (!ValidCardIndex(cardTargetIndex1) ||
-							!ValidCardIndex(cardTargetIndex2) ||
-							m_deck[cardTargetIndex1].belongsTo == Player.NoPlayerIndex ||
-							m_deck[cardTargetIndex2].belongsTo == Player.NoPlayerIndex)
-							return;
+
+						AssertValidCardIndex(cardTargetIndex1);
+						AssertValidCardIndex(cardTargetIndex2);
+						AssertCardDoesntBelongToPlayer(cardTargetIndex1, Player.NoPlayerIndex);
+						AssertCardDoesntBelongToPlayer(cardTargetIndex2, Player.NoPlayerIndex);
 
 						cardTargetIndex1 = GetCardWithBounce(cardTargetIndex1);
 						cardTargetIndex2 = GetCardWithBounce(cardTargetIndex2);
@@ -382,25 +392,26 @@ namespace Divine
 
 		public void ExchangeCard(int playerIndex, int playerCardIndex, int targetCardIndex)
 		{
-			if (!ValidPlayerIndex(playerIndex) ||
-				!ValidCardIndex(playerCardIndex) ||
-				!ValidCardIndex(targetCardIndex))
-				return;
+			AssertValidPlayerIndex(playerIndex);
+			AssertValidCardIndex(playerCardIndex);
+			AssertValidCardIndex(targetCardIndex);
+			AssertPlayerTurnUnequal(playerIndex);
 
 			Card playerCard = m_deck[playerCardIndex];
 			Card targetCard = m_deck[targetCardIndex];
-			if (playerCard.belongsTo != playerIndex ||
-				targetCard.belongsTo == Player.NoPlayerIndex)
-				return;
 
+			AssertCardBelongsToPlayer(playerCardIndex, playerIndex);
+			AssertCardDoesntBelongToPlayer(targetCardIndex, Player.NoPlayerIndex);
+
+			int otherPlayer = targetCard.belongsTo;
 			Player playerOrigin = m_players[playerIndex];
-			Player playerTarget = m_players[targetCard.belongsTo];
-
+			Player playerTarget = m_players[otherPlayer];
+			
 			playerOrigin.ThrowCard(playerCardIndex, playerCard);
 			playerTarget.ThrowCard(targetCardIndex, targetCard);
 
 			playerOrigin.DrawCard(playerIndex, targetCardIndex, targetCard);
-			playerTarget.DrawCard(targetCard.belongsTo, playerCardIndex, playerCard);
+			playerTarget.DrawCard(otherPlayer, playerCardIndex, playerCard);
 
 			NextTurn();
 		}
@@ -429,9 +440,21 @@ namespace Divine
 
 		//-UTILITY---------------------------------------------------------------//
 
+		private void AssertValidPlayerIndex(int playerIndex)
+		{
+			if (!ValidPlayerIndex(playerIndex))
+				throw new Exception("InvalidPlayerIndex(" + playerIndex + ")");
+		}
+
 		private bool ValidPlayerIndex(int playerIndex)
 		{
 			return playerIndex >= 0 && playerIndex < m_players.Length;
+		}
+
+		private void AssertValidCardIndex(int cardIndex)
+		{
+			if (!ValidCardIndex(cardIndex))
+				throw new Exception("InvalidCardIndex(" + cardIndex + ")");
 		}
 
 		private bool ValidCardIndex(int cardIndex)
@@ -439,19 +462,46 @@ namespace Divine
 			return cardIndex >= 0 || cardIndex < m_deck.Length;
 		}
 
+		private void AssertPlayerTurnUnequal(int playerIndex)
+		{
+			if (playerIndex != m_playersTurn[m_playerTurnIndex])
+				throw new Exception("PlayerTurnUnequal(" +
+					playerIndex + " index != " + m_playersTurn[m_playerTurnIndex] + " turn)");
+		}
+
+		private void AssertCardDoesntBelongToPlayer(int cardIndex, int playerIndex)
+		{
+			if (m_deck[cardIndex].belongsTo == playerIndex)
+				throw new Exception("Card(" + cardIndex + ") belongs to player(" + playerIndex + ")");
+		}
+
+		private void AssertCardBelongsToPlayer(int cardIndex, int playerIndex)
+		{
+			if (m_deck[cardIndex].belongsTo != playerIndex)
+				throw new Exception("Card(" + cardIndex + ") Doesn't belong to player(" + playerIndex + ")");
+		}
+
+		private void AssertExtraParamsDontMatch(int[] extra, int Length)
+		{
+			if (extra == null)
+				throw new Exception("ExtraParamsDontMatch(null)");
+
+			if (extra.Length != Length)
+				throw new Exception("ExtraParamsDontMatch(" + extra.Length + " != " + Length + ")");
+		}
+
 		private int GetCardWithBounce(int cardIndex)
 		{
-			if (!ValidCardIndex(cardIndex))
-				return Card.NoCardIndex;
+			AssertValidCardIndex(cardIndex);
 
 			int currentCardIndex = cardIndex;
 			while (true)
 			{
 				int next = m_deck[currentCardIndex].Bounce();
-				if (next == Card.NoCardIndex || m_deck[next].belongsTo == Player.NoPlayerIndex)
-					break;
-				else
+				if (next != Card.NoCardIndex && m_deck[next].belongsTo != Player.NoPlayerIndex)
 					currentCardIndex = next;
+				else
+					break;
 			}
 
 			return currentCardIndex;
@@ -467,6 +517,7 @@ namespace Divine
 
 				ShufflePlayers(m_playersTurn);
 				m_playerTurnIndex = 0;
+				m_roundNumber++;
 				m_endOfRoundType = EndOfRoundType.None;
 
 				EmitEndOfTurn(endOfTurnType);
@@ -535,10 +586,15 @@ namespace Divine
 					targets.Remove(look.belongsTo);
 			}
 
-			int[] finalTargets = new int[targets.Count];
-			targets.CopyTo(finalTargets);
-			int targetIndex = NextRandom() % finalTargets.Length;
-			EmitRadarBeep(finalTargets[targetIndex]);
+			if (targets.Count > 0)
+			{
+				int[] finalTargets = new int[targets.Count];
+				targets.CopyTo(finalTargets);
+			
+				int targetIndex = NextRandom() % finalTargets.Length;
+				EmitRadarBeep(finalTargets[targetIndex]);
+			}
+			
 		}
 
 		private void EmitRadarBeep(int playerIndex)
