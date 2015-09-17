@@ -186,7 +186,7 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 		ui.LineSeparator();
 		ui.HorizontalLayout(() =>
 		{
-			slots = ui.IntField("Num slots", slots);
+			slots = ui.IntField("Slots", slots);
 			if (slots < 2) slots = 2;
 			if (slots > 4) slots = 4;
 
@@ -194,7 +194,7 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 				manager.CreateRoom(connectionId, (byte)slots);
 		});
 
-		if (ui.Button("Random or create"))
+		if (ui.Button("Join random or create"))
 		{
 			manager.JoinRandomOrCreateRoom(connectionId, (byte)slots);
 		}
@@ -460,7 +460,7 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 				|| (card.Type == Divine.CardType.SecondOration
 				 && (!player.Orations[0] || player.Orations[1]))
 				|| (card.Type == Divine.CardType.ThirdOration
-				&& (!player.Orations[0] || !player.Orations[2] || player.Orations[3])))
+				&& (!player.Orations[0] || !player.Orations[1] || player.Orations[2])))
 				mask |= Silver.UI.Immediate.FlagMask.NoInteractable;
 
 			ui.NextLayoutElement = buttonLayout;
