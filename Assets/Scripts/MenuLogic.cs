@@ -3,8 +3,15 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.Listener {
+public interface ARLogicView
+{
+	void ARCardTrackedLost();
+	void NewARCardTracked(int cardIndex, GameObject parent);
+}
 
+public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.Listener, ARLogicView
+{
+	[SerializeField] private CardContentManager contentManager = null;
 	[SerializeField] private string address = "thatguystudio.com";
 	[SerializeField] private string clientName = "David";
 	[SerializeField] private string appId = "divine-and-conquer-0";
@@ -88,6 +95,10 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 
 	private BiribitManager manager;
 
+	private int m_ARCardIndex = Divine.Card.NoCardIndex;
+	private Divine.CardType m_ARCardType = Divine.CardType.None;
+	private GameObject m_ARCardParent = null;
+
 	static private string[] randomNames = {
 		"Jesus",
 		"David",
@@ -117,6 +128,9 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 
 		buttonLayout.flexibleWidth = 1;
 		buttonLayout.minHeight = 40;
+
+		if (contentManager == null)
+			throw new Exception("No contentManager assigned in inspector");
 	}
 
 	override public void DrawUI()
@@ -258,14 +272,14 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 	{
 		manager.JoinedRoomEntries(connectionId);
 
-		if (ui.Button("Leave"))
-			manager.JoinRoom(connectionId, 0);
-
 		Biribit.Room[] roomArray = manager.Rooms(connectionId);
 		Biribit.Room rm = roomArray[joinedRoomIndex];
 
 		if (m_game == null || m_game.GetWinnerPlayerIndex() != Divine.Player.NoPlayerIndex)
 		{
+			if (ui.Button("Leave"))
+				manager.JoinRoom(connectionId, 0);
+
 			if (m_game != null)
 			{
 				int winnerPlayer = m_game.GetWinnerPlayerIndex();
@@ -324,22 +338,43 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 		int player = FindPlayerIndex((byte)manager.JoinedRoomSlot(connectionId));
 		if (player != Divine.Player.NoPlayerIndex)
 		{
-			DrawAnnouncement();
-			DrawPlayer(player);
+			if (m_ARCardIndex == Divine.Card.NoCardIndex)
+			{
+				if (ui.Button("Leave"))
+					manager.JoinRoom(connectionId, 0);
+
+				DrawAnnouncement();
+				DrawPlayer(player);
+			}
 
 			bool[] draw = m_game.GetPlayersNeedToDraw();
 			if (draw[player])
 			{
-				ui.Separator(1);
-				ui.LabelField("You need to draw cards");
-				ui.LineSeparator();
-				int drawedCardIndex = 0;
 				Divine.PlayerView playerView = m_game.GetPlayer(player);
-				if (DrawNumeric(1, m_game.DeckSize, ref drawedCardIndex, (int index) => {
-					return m_game.GetCard(index - 1).BelongsTo == Divine.Player.NoPlayerIndex &&
-						playerView.LastCardThrown != (index - 1);
-				}))
-					manager.SendEntry(connectionId, DivineSerializator.DrawCard(drawedCardIndex-1));
+				if (m_ARCardIndex == Divine.Card.NoCardIndex)
+				{
+					ui.Separator(1);
+					ui.LabelField("You need to draw cards");
+					ui.LineSeparator();
+					int drawedCardIndex = 0;
+					if (DrawNumeric(1, m_game.DeckSize, ref drawedCardIndex, (int index) => {
+						return m_game.GetCard(index - 1).BelongsTo == Divine.Player.NoPlayerIndex &&
+							playerView.LastCardThrown != (index - 1);
+					}))
+						manager.SendEntry(connectionId, DivineSerializator.DrawCard(drawedCardIndex - 1));
+				}
+				else
+				{
+					Silver.UI.Immediate.FlagMask mask = Silver.UI.Immediate.FlagMask.None;
+					bool grabbable = m_game.GetCard(m_ARCardIndex).BelongsTo == Divine.Player.NoPlayerIndex
+						&& playerView.LastCardThrown != m_ARCardIndex;
+
+					mask = grabbable ? mask : mask | Silver.UI.Immediate.FlagMask.NoInteractable;
+
+					if (ui.Button("Grab this card", mask))
+						manager.SendEntry(connectionId, DivineSerializator.DrawCard(m_ARCardIndex));
+				}
+				
 			}
 			else
 			{
@@ -363,10 +398,6 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 
 				if (first)
 				{
-					ui.Separator(1);
-					ui.LabelField("Turn action");
-					ui.LineSeparator();
-
 					int playerTurn = m_game.GetWhoseTurnIsIt();
 					if (player != playerTurn)
 					{
@@ -376,10 +407,18 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 							joinedRoom.slots[turnSlot].ToString() :
 							manager.RemoteClients(connectionId)[turnClientIndex].name;
 
+						ui.Separator(1);
 						ui.LabelField("It's player " + (playerTurn + 1).ToString() + "(" + drawName + ") turn!", 14);
 					}
 					else
 					{
+						if (m_ARCardIndex == Divine.Card.NoCardIndex)
+						{
+							ui.Separator(1);
+							ui.LabelField("Turn action");
+							ui.LineSeparator();
+						}
+
 						DrawTurn(joinedRoom, player);
 					}
 				}
@@ -387,6 +426,9 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 		}
 		else
 		{
+			if (ui.Button("Leave"))
+				manager.JoinRoom(connectionId, 0);
+
 			ui.LabelField("Wait players to finish...");
 		}
 	}
@@ -434,55 +476,70 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 		});
 	}
 
-	public void DrawTurn(Biribit.Room joinedRoom, int playerIndex)
+	public void DrawTurnButtonAction(Divine.PlayerView player, int cardIndex, int handIndex)
 	{
-		Divine.PlayerView player = m_game.GetPlayer(playerIndex);
-		ui.BeginHorizontalLayout();
+		Divine.CardView card = m_game.GetCard(cardIndex);
+		string buttonName = Enum.GetName(typeof(Divine.CardType), card.Type) +
+		" (" + (cardIndex + 1).ToString() + ")";
 
-		Silver.UI.Immediate.FlagMask mask;
-		for (int i = 0; i < player.Hand.Length; i++)
-		{
-			if (i == 2)
-			{
-				ui.EndHorizontalLayout();
-				ui.BeginHorizontalLayout();
-			}
-
-			Divine.CardView card = m_game.GetCard(player.Hand[i]);
-			string buttonName = Enum.GetName(typeof(Divine.CardType), card.Type) +
-			" (" + (player.Hand[i] + 1).ToString() + ")";
-
-			mask = Silver.UI.Immediate.FlagMask.None;
-			if (m_turnAction == i 
-				|| card.Type == Divine.CardType.Curse
-				|| (card.Type == Divine.CardType.FirstOration 
-				 && player.Orations[0])
-				|| (card.Type == Divine.CardType.SecondOration
-				 && (!player.Orations[0] || player.Orations[1]))
-				|| (card.Type == Divine.CardType.ThirdOration
-				&& (!player.Orations[0] || !player.Orations[1] || player.Orations[2])))
-				mask |= Silver.UI.Immediate.FlagMask.NoInteractable;
-
-			ui.NextLayoutElement = buttonLayout;
-			if (ui.Button(buttonName, mask))
-			{
-				m_turnAction = i;
-				m_turnExtraParams.Clear();
-			}
-		}
-
-		mask = Silver.UI.Immediate.FlagMask.None;
-		if (m_turnAction == 3)
+		Silver.UI.Immediate.FlagMask mask = Silver.UI.Immediate.FlagMask.None;
+		if (m_turnAction == handIndex
+			|| card.Type == Divine.CardType.Curse
+			|| (card.Type == Divine.CardType.FirstOration
+			 && player.Orations[0])
+			|| (card.Type == Divine.CardType.SecondOration
+			 && (!player.Orations[0] || player.Orations[1]))
+			|| (card.Type == Divine.CardType.ThirdOration
+			&& (!player.Orations[0] || !player.Orations[1] || player.Orations[2])))
 			mask |= Silver.UI.Immediate.FlagMask.NoInteractable;
 
 		ui.NextLayoutElement = buttonLayout;
-		if (ui.Button("Exchange", mask))
+		if (ui.Button(buttonName, mask))
 		{
-			m_turnAction = 3;
+			m_turnAction = handIndex;
 			m_turnExtraParams.Clear();
 		}
+	}
 
-		ui.EndHorizontalLayout();
+	public void DrawTurn(Biribit.Room joinedRoom, int playerIndex)
+	{
+		Divine.PlayerView player = m_game.GetPlayer(playerIndex);
+
+		if (m_ARCardIndex == Divine.Card.NoCardIndex)
+		{
+			ui.BeginHorizontalLayout();
+
+			for (int i = 0; i < player.Hand.Length; i++)
+			{
+				if (i == 2)
+				{
+					ui.EndHorizontalLayout();
+					ui.BeginHorizontalLayout();
+				}
+
+				DrawTurnButtonAction(player, player.Hand[i], i);
+			}
+
+			Silver.UI.Immediate.FlagMask mask = Silver.UI.Immediate.FlagMask.None;
+			if (m_turnAction == 3)
+				mask |= Silver.UI.Immediate.FlagMask.NoInteractable;
+
+			ui.NextLayoutElement = buttonLayout;
+			if (ui.Button("Exchange", mask))
+			{
+				m_turnAction = 3;
+				m_turnExtraParams.Clear();
+			}
+
+			ui.EndHorizontalLayout();
+		}
+		else
+		{
+			if (m_turnAction == -1)
+				for (int i = 0; i < player.Hand.Length; i++)
+					if(m_ARCardIndex == player.Hand[i])
+						DrawTurnButtonAction(player, player.Hand[i], i);
+		}
 
 		if (m_turnAction >= 0 && m_turnAction < 3)
 		{
@@ -739,30 +796,38 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 			(int seed, int[] playerSet) => //OnStart
 			{
 				m_game = new Divine.State();
+
 				m_game.AddListener(this);
 				m_game.StartGame(seed, playerSet.Length);
 				m_playerSet = playerSet;
 				m_announcement.Clear();
 				m_announcementCount = 0;
+
+				UpdateARCardTracked();
 			},
 			(int cardIndex, int[] extraParams) => //OnUseCard
 			{
 				int player = FindPlayerIndex(entry.slot_id);
 				try { m_game.UseCard(player, cardIndex, extraParams); }
 				catch (Exception ex) { DebugMessage(ex.Message); }
-				
+
+				UpdateARCardTracked();
 			},
 			(int cardIndex) => //OnDrawCard
 			{
 				int player = FindPlayerIndex(entry.slot_id);
 				try { m_game.DrawCard(player, cardIndex); }
 				catch (Exception ex) { DebugMessage(ex.Message); }
+
+				UpdateARCardTracked();
 			},
 			(int cardIndex1, int cardIndex2) => //OnExchangeCard
 			{
 				int player = FindPlayerIndex(entry.slot_id);
 				try { m_game.ExchangeCard(player, cardIndex1, cardIndex2); }
 				catch (Exception ex) { DebugMessage(ex.Message); }
+
+				UpdateARCardTracked();
 			});
 	}
 
@@ -848,6 +913,70 @@ public class MenuLogic : Silver.UI.TabImmediate, BiribitListener, Divine.State.L
 			joinedRoomId = Biribit.Client.UnassignedId;
 			joinedRoomSlot = Biribit.Client.UnassignedId;
 			m_game = null;
+			contentManager.RestoreAll();
+		}
+	}
+
+	public void ARCardTrackedLost()
+	{
+		if (m_ARCardIndex != Divine.Card.NoCardIndex)
+		{
+			m_ARCardIndex = Divine.Card.NoCardIndex;
+			m_ARCardParent = null;
+			UpdateARCardTracked();
+		}
+	}
+
+	public void NewARCardTracked(int cardIndex, GameObject parent)
+	{
+		Debug.Log("NewARCardTracked " + cardIndex + " " + parent.name);
+
+		if (m_ARCardIndex != Divine.Card.NoCardIndex)
+			ARCardTrackedLost();
+
+		m_ARCardIndex = cardIndex;
+		m_ARCardParent = parent;
+
+		UpdateARCardTracked();
+	}
+
+	public void UpdateARCardTracked()
+	{
+		if (m_ARCardIndex == Divine.Card.NoCardIndex)
+		{
+			if (m_ARCardType != Divine.CardType.None)
+				contentManager.RestoreCardFromType(m_ARCardType);
+
+			m_ARCardType = Divine.CardType.None;
+		}
+		else
+		{
+			Divine.CardType type = Divine.CardType.Unknown;
+
+			if (m_game != null)
+			{
+				int player = FindPlayerIndex((byte)manager.JoinedRoomSlot(connectionId));
+				Divine.CardView card = m_game.GetCard(m_ARCardIndex);
+				if (card.BelongsTo == player)
+					type = card.Type;
+				else
+					type = Divine.CardType.Unknown;
+			}
+				
+
+			if (m_ARCardType != type)
+			{
+				if (m_ARCardType != Divine.CardType.None)
+					contentManager.RestoreCardFromType(m_ARCardType);
+
+				if (type != Divine.CardType.None) {
+					GameObject cardObject = contentManager.GetCardFromType(type);
+					if (m_ARCardParent != null)
+						cardObject.transform.SetParent(m_ARCardParent.transform, false);
+				}
+				
+				m_ARCardType = type;
+			}
 		}
 	}
 }

@@ -3,9 +3,10 @@ using System.Collections.Generic;
 
 namespace Divine
 {
-	public enum CardType
+	public enum CardType : int
 	{
-		None,
+		None = -1,
+		Unknown = 0,
 		FirstOration,
 		SecondOration,
 		ThirdOration,
@@ -14,7 +15,8 @@ namespace Divine
 		AntiRadar,
 		Shuffle,
 		RevealCard,
-		Bounce
+		Bounce,
+		Count
 	}
 
 	public interface CardView
@@ -182,7 +184,7 @@ namespace Divine
 			else if (orations[0] && orations[1] && !orations[2])
 				return CardType.ThirdOration;
 			else
-				return CardType.None;
+				return CardType.Unknown;
 		}
 	}
 
